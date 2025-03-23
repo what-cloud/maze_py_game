@@ -1,0 +1,221 @@
+import random
+from pynput.keyboard import Key, Listener
+import os
+import threading
+import time
+
+# Game settings
+GRID_SIZE = 15  # Increased size for better maze structure
+MAX_STEPS = 100
+FOOD = int(input('How much food you want to bring in?设定体力: '))
+
+# Cell types
+EMPTY = 0
+WALL = 1
+PLAYER = 'P'
+EXIT = 'E'
+
+# Global variables for game state
+player_x, player_y = 0, 0
+steps = 0
+food = FOOD
+game_running = True
+maze = None
+
+def clear_screen():
+    """Clear the console screen"""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def create_structured_maze():
+    """Create a maze with structured walls and deliberate dead ends"""
+    maze = [[EMPTY for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    
+    # Create some long horizontal walls with gaps
+    for y in [3, 7, 11]:
+        wall_start = random.randint(1, 3)
+        wall_end = random.randint(GRID_SIZE-4, GRID_SIZE-2)
+        gap = random.randint(wall_start+2, wall_end-2)
+        for x in range(wall_start, wall_end):
+            if x != gap:
+                maze[y][x] = WALL
+    
+    # Create vertical connecting walls and dead ends
+    for x in [4, 8, 12]:
+        wall_start = random.randint(1, 3)
+        wall_end = random.randint(GRID_SIZE-4, GRID_SIZE-2)
+        gap = random.randint(wall_start+2, wall_end-2)
+        
+        # Create dead end branch
+        dead_end_length = random.randint(2, 4)
+        dead_end_y = random.randint(wall_start, wall_end-dead_end_length)
+        
+        for y in range(wall_start, wall_end):
+            if y != gap:
+                maze[y][x] = WALL
+                # Add dead end branch
+                if y == dead_end_y:
+                    for dx in range(1, dead_end_length):
+                        if x + dx < GRID_SIZE:
+                            maze[y][x + dx] = WALL
+
+    # Ensure start and end are clear
+    maze[0][0] = EMPTY
+    maze[GRID_SIZE-1][GRID_SIZE-1] = EMPTY
+    
+    # Ensure path exists
+    ensure_valid_path(maze)
+    
+    return maze
+
+def ensure_valid_path(maze):
+    """Ensure there's at least one valid path by clearing necessary cells"""
+    while not has_valid_path(maze):
+        # Create a winding path from start to end
+        x, y = 0, 0
+        while x < GRID_SIZE-1 or y < GRID_SIZE-1:
+            maze[y][x] = EMPTY
+            if random.random() < 0.5 and x < GRID_SIZE-1:
+                x += 1
+            elif y < GRID_SIZE-1:
+                y += 1
+            maze[y][x] = EMPTY
+
+def has_valid_path(maze):
+    """Check if there's a valid path from start to end using DFS"""
+    visited = set()
+    
+    def dfs(x, y):
+        if x < 0 or y < 0 or x >= GRID_SIZE or y >= GRID_SIZE:
+            return False
+        if maze[y][x] == WALL:
+            return False
+        if (x, y) == (GRID_SIZE-1, GRID_SIZE-1):
+            return True
+        if (x, y) in visited:
+            return False
+        
+        visited.add((x, y))
+        return (dfs(x+1, y) or dfs(x-1, y) or
+                dfs(x, y+1) or dfs(x, y-1))
+    
+    return dfs(0, 0)
+
+def display_maze(maze, player_x, player_y):
+    """Display the maze with walls, player position and exit"""
+    clear_screen()
+    print(f"\nSteps: {steps}/{MAX_STEPS} | Food: {food}")
+    print("\n" + "+" + "---+" * GRID_SIZE)
+    for y in range(GRID_SIZE):
+        row1 = "|"
+        for x in range(GRID_SIZE):
+            if x == player_x and y == player_y:
+                row1 += " P |"
+            elif x == GRID_SIZE-1 and y == GRID_SIZE-1:
+                row1 += " E |"
+            elif maze[y][x] == WALL:
+                row1 += "███|"
+            else:
+                row1 += "   |"
+        print(row1)
+        print("+" + "---+" * GRID_SIZE)
+
+def is_valid_move(maze, x, y):
+    """Check if the move is valid (within bounds and not a wall)"""
+    return (0 <= x < GRID_SIZE and 
+            0 <= y < GRID_SIZE and 
+            maze[y][x] != WALL)
+
+def check_game_over():
+    """Check game over conditions and return appropriate message"""
+    global game_running
+    if food <= 0:
+        return "\n体力不支！结束再来！Game Over! You ran out of food."
+    if steps >= MAX_STEPS:
+        return "\nGame Over! You exceeded the travel limit."
+    if (player_x, player_y) == (GRID_SIZE-1, GRID_SIZE-1):
+        return "\n恭喜！Congratulations! You reached the exit and survived!"
+    return None
+
+def on_key_release(key):
+    """Handle key releases"""
+    global player_x, player_y, steps, food, game_running
+    
+    if not game_running:
+        if key == Key.esc:
+            return False
+        return
+
+    new_x, new_y = player_x, player_y
+
+    if key == Key.right:
+        new_x += 1
+    elif key == Key.left:
+        new_x -= 1
+    elif key == Key.up:
+        new_y -= 1
+    elif key == Key.down:
+        new_y += 1
+    elif key == Key.esc:
+        game_running = False
+        return False
+
+    if is_valid_move(maze, new_x, new_y):
+        player_x, player_y = new_x, new_y
+        food -= 1
+        steps += 1
+        display_maze(maze, player_x, player_y)
+        
+        game_over_msg = check_game_over()
+        if game_over_msg:
+            print(game_over_msg)
+            game_running = False
+            print("\nPress ESC to exit")
+
+def for_terminal():
+    import termios
+
+    def get_key():
+        """Reads a single keypress and returns it as a string."""
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)  # Set terminal to raw mode
+            key = sys.stdin.read(3)  # Read up to 3 bytes (for escape sequences)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)  # Restore settings
+        return key
+
+    while True:
+        key = get_key()
+        
+        if key == '\x1b[D':  # Left arrow
+            print("Left Arrow")
+        elif key == '\x1b[C':  # Right arrow
+            print("Right Arrow")
+        elif key == '\x1b[A':  # Up arrow
+            print("Up Arrow")
+        elif key == '\x1b[B':  # Down arrow
+            print("Down Arrow")
+        elif key == 'q':  # Press 'q' to quit
+            break
+
+def main():
+    global maze, game_running
+    
+    print("\nWelcome to the Maze Survival Game!")
+    print("Use arrow keys to move 方向键移动, ESC to exit")
+    print("P = Player, E = Exit, ███ = Wall")
+    print(f"Reach the exit before food runs out or step limit ({MAX_STEPS}) is reached!")
+    
+    # Initialize maze
+    maze = create_structured_maze()
+    display_maze(maze, player_x, player_y)
+
+    # Start keyboard listener
+    with Listener(on_release=on_key_release) as listener:
+        listener.join()
+
+    print("\nThanks for playing!")
+
+if __name__ == "__main__":
+    main()
